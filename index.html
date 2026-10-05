@@ -19,7 +19,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 var(--body)}
 #demos{position:absolute;left:12px;bottom:12px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;z-index:2}
 #demos button{background:rgba(15,21,27,.85)}
 #viewbar button.on{background:var(--accent);color:#1a1208}
-#card{position:absolute;left:12px;bottom:12px;max-width:340px;background:rgba(22,30,38,.94);border:1px solid var(--line);border-radius:4px;padding:10px 12px;display:none}
+#card{position:absolute;left:12px;bottom:58px;max-width:340px;background:rgba(22,30,38,.94);border:1px solid var(--line);border-radius:4px;padding:10px 12px;display:none}
 #card strong{display:block;font:600 15px var(--display);margin-bottom:2px}
 #card p{margin:0 0 6px;color:var(--muted)}
 #card button{padding:3px 8px}
@@ -85,7 +85,6 @@ th{color:var(--muted);font-weight:500}
 .note{color:var(--muted);font-size:11px}
 @media(max-width:900px){#app{grid-template-columns:1fr;grid-template-rows:62vh auto;height:auto;min-height:100%}#rail{border-left:0;border-top:1px solid var(--line);overflow:visible}}
 </style>
-
 <div id="app">
  <div id="stage">
   <canvas id="c" tabindex="0"></canvas>
@@ -144,7 +143,7 @@ th{color:var(--muted);font-weight:500}
 
   <div class="pane" id="p-opt">
    <div class="grp"><h2>Hollow cathode lamp</h2>
-    <div class="row"><select id="lampSel" aria-label="Lamp"><option value="Cu">Cu lamp</option><option value="Zn">Zn lamp</option></select><button id="lampSw">Lamp OFF</button></div>
+    <div class="row"><select id="lampSel" aria-label="Lamp"><option value="Cu">Cu lamp</option><option value="Zn">Zn lamp</option><option value="Na">Na lamp</option></select><button id="lampSw">Lamp OFF</button></div>
     <div><div class="lbl"><span>Working current</span><b id="lampTxt">4.0 mA</b></div><input type="range" id="lampI" min="0.5" max="15" step="0.5" value="4" aria-label="Lamp current"><div class="note" id="lampRec">Recommended: 4 mA</div></div></div>
    <div class="grp"><h2>Deuterium background corrector</h2>
     <div class="row"><button id="d2Sw">D2 OFF</button></div>
@@ -1262,7 +1261,7 @@ const rnd=(a,b)=>a+Math.random()*(b-a);
 const ELEMENTS={
  Cu:{wl:324.8,S:0.10,Se:2,rec:4,lamp:true,bg:0.03},
  Zn:{wl:213.9,S:0.20,Se:0.05,rec:5,lamp:true,bg:0.07},
- Na:{wl:589.0,S:0,Se:50,lamp:false,bg:0},
+ Na:{wl:589.0,S:0.20,Se:50,rec:8,lamp:true,bg:0.01},
  K:{wl:766.5,S:0,Se:0,lamp:false,bg:0},
  Ca:{wl:422.7,S:0,Se:0,lamp:false,bg:0},
  Mg:{wl:285.2,S:0,Se:0,lamp:false,bg:0},
@@ -1278,7 +1277,7 @@ const S={
  lamp:{el:'Cu',on:false,I:4,age:0},d2:{on:false,level:60},
  mono:{el:'Cu',slit:0.5},pmtV:450,
  sel:null,
- feedF:{cu:0,zn:0,na:0,m:0},feedS:{cu:0,zn:0,na:0,m:0},
+ feedF:{cu:0,zn:0,na:0,m:0,b:0},feedS:{cu:0,zn:0,na:0,m:0,b:0},visW:{naW:0,cuF:0,cuH:0,znF:0,znH:0,m:0},
  ouU:0,ouF:0,ouB:0,ouB2:0,zeroH:0,zeroD:0,phase:Math.random()*6.28,
  zero:{abs:0,em:0},
  buf:[],
@@ -1292,7 +1291,7 @@ function statAdd(m,vals){const t=S.stats[m];t.n++;for(const k in vals){const x=v
 statReset();
 /* Sensitivity factors: each student gets their own instrument, and it changes with every power cycle, lamp start and ignition */
 function gDraw(sd){return Math.exp(sd*clamp(gauss(),-2.5,2.5))}
-const G={student:gDraw(0.05),power:gDraw(0.07),lamp:gDraw(0.03),flame:gDraw(0.04),drift:0,tick:0};
+const G={student:gDraw(0.05),power:gDraw(0.07),lamp:gDraw(0.03),flame:gDraw(0.04),drift:0,tick:0,off:Math.min(0.02,Math.max(-0.004,0.008+0.005*gauss()))}; /* off: blank/baseline offset in A for non-water bottles (diluent and glassware blank), so calibration lines do not pass through exactly zero */
 function gMult(){return G.student*G.power*G.lamp*G.flame*(1+G.drift)}
 function gUptake(){return G.flame*(1+G.drift)}
 function setMsg(text,cls){S.msg={text,cls:cls||'warn',t:S.time}}
@@ -1406,7 +1405,7 @@ function optics(){
 function effConc(){const o={};for(const k in S.feedF)o[k]=0.985*S.feedF[k]+0.015*S.feedS[k];return o}
 function steady(){
  const c=effConc(),o=optics(),rr=ratio();
- const r={A:0,I:0,E:o.E,o,rr,atomic:0,bg:0,corr:0,over:false,noLight:false};
+ const r={A:0,I:0,E:o.E,o,rr,atomic:0,bg:0,corr:0,off:0,over:false,noLight:false};
  const ek=S.mono.el,el=ELEMENTS[ek];
  if(S.mode==='abs'){
   if(o.E<5){r.noLight=true;return r}
@@ -1417,7 +1416,8 @@ function steady(){
   r.atomic=curve(lin);
   if(S.lamp.el===ek)r.bg=Math.min(1.5,c.m*el.bg*gUptake());
   r.corr=(S.d2.on&&el.wl<=350)?r.bg*clamp(o.ratio,0,2):0;
-  r.A=r.atomic+r.bg-r.corr;
+  r.off=(S.lamp.el===ek)?c.b*(ek==='Zn'?1.4:1):0;
+  r.A=r.atomic+r.bg-r.corr+r.off;
  }else{
   if(!S.lit)return r;
   const conc=c[ek.toLowerCase()]||0,g=(S.mono.slit/0.5)*o.gf;
@@ -1429,9 +1429,10 @@ function steady(){
  return r;
 }
 function targetConc(dt){
- const z={cu:0,zn:0,na:0,m:0},sol=S.sel?solById(S.sel):null;
+ const z={cu:0,zn:0,na:0,m:0,b:0},sol=S.sel?solById(S.sel):null;
  if(!sol||!S.air.on||S.air.flow<3)return z;
- const pack=()=>({cu:sol.c.cu,zn:sol.c.zn,na:sol.c.na,m:sol.m});
+ if(sol.b===undefined)sol.b=sol.kind==='upw'?0:G.off+0.0015*gauss();
+ const pack=()=>({cu:sol.c.cu,zn:sol.c.zn,na:sol.c.na,m:sol.m,b:sol.b});
  if(S.sampling==='cont'){if(sol.vol<=0.3)return z;sol.vol=Math.max(0,sol.vol-5/60*dt);return pack()}
  const q=S.aliq;return(q.active&&q.t<q.T&&q.solId===sol.id)?pack():z;
 }
@@ -1473,6 +1474,9 @@ function step(dt){
  /* feed memory */
  const tg=targetConc(dt),tf=S.sampling==='aliq'?0.7:1.2;
  for(const k in tg){S.feedF[k]+=(tg[k]-S.feedF[k])*(1-Math.exp(-dt/tf));S.feedS[k]+=(tg[k]-S.feedS[k])*(1-Math.exp(-dt/10))}
+ /* visual weights for flame colour and glow: gradual but fast, same speed up and down (not tied to the slow feed memory) */
+ {const W=S.visW,t={naW:1-Math.exp(-tg.na/4),cuF:1-Math.exp(-tg.cu/12),cuH:1-Math.exp(-tg.cu/6),znF:smooth(20,200,tg.zn),znH:1-Math.exp(-tg.zn/1.2),m:smooth(.5,5,tg.m)};
+  for(const k in t)W[k]+=(t[k]-W[k])*(1-Math.exp(-dt/(t[k]>W[k]?0.5:0.6)))}
  if(S.aliq.active)S.aliq.t+=dt;
  /* noise */
  const st=steady(),o=st.o;
@@ -1487,7 +1491,7 @@ function step(dt){
    const relN=0.05*(1+1.5*Math.max(0,(st.A-0.6)/0.6))*(st.rr>1.5?1.5:1)*(S.lamp.I<0.4*ELEMENTS[S.lamp.el].rec?2:1);
    const drift=S.lamp.on?0.03*Math.exp(-S.lamp.age/40)*Math.sin(S.lamp.age/7+S.phase):0;
    const fdrift=S.lit?0.006*Math.exp(-S.litAge/30)*Math.cos(S.litAge/5):0;
-   rawH=(st.atomic+st.bg)*(1+relN*S.ouF+0.3*relN*S.ouU)+0.0014*nf*S.ouB+0.004*nf*gauss()+drift+fdrift;
+   rawH=(st.atomic+st.bg)*(1+relN*S.ouF+0.3*relN*S.ouU)+st.off+0.0014*nf*S.ouB+0.004*nf*gauss()+drift+fdrift;
    if(st.over)rawH+=0.05*gauss();
    S.ouB2+=(-S.ouB2/4)*dt+Math.sqrt(2*dt/4)*gauss();
    rawD=(S.d2.on&&o.D>0)?st.corr*(1+relN*S.ouF+0.3*relN*S.ouU)+0.0014*nf*S.ouB2+0.004*nf*gauss():0;
@@ -1626,15 +1630,13 @@ box(2.5,.05,1.3,hoodM,-.7,4.3,0);{const duct=new THREE.Mesh(new THREE.CylinderGe
 const turret=new THREE.Group();turret.position.set(-5.0,BY,0);scene.add(turret);
 cyl(.45,.45,.7,M.steel,0,0,0,turret);cyl(.15,.15,1.3,M.dark,0,0,0,turret);
 const lampGlow=[];
-['Cu','Zn',null,null].forEach((el,i)=>{
- const g=new THREE.Group();g.rotation.y=i*Math.PI/2;turret.add(g);
+['Cu','Zn','Na'].forEach((el,i)=>{ /* three lamps 120 degrees apart: every lamp stays inside the lamp bay at every turret position */
+ const g=new THREE.Group();g.rotation.y=i*2*Math.PI/3;turret.add(g);
  cyl(.26,.26,.3,M.dark,.55,0,0,g,'x');
- if(el){
-  cyl(.2,.2,.7,mat(el==='Cu'?0x8fb59a:0x9aa8c8,{metalness:.5}),.95,0,0,g,'x');
-  const gl=mat(0xdfe9f2,{transparent:true,opacity:.55,roughness:.1,emissive:el==='Cu'?0xff8a2c:0xff3a4a,emissiveIntensity:0});
-  cyl(.17,.17,.32,gl,1.46,0,0,g,'x');cyl(.03,.03,.3,M.brass,1.46,0,0,g,'x');
-  lampGlow.push({el,mat:gl});
- }else cyl(.12,.12,.3,M.dark,.9,0,0,g,'x');
+ cyl(.2,.2,.6,mat(el==='Cu'?0x8fb59a:el==='Na'?0xc9b27a:0x9aa8c8,{metalness:.5}),.9,0,0,g,'x');
+ const gl=mat(0xdfe9f2,{transparent:true,opacity:.55,roughness:.1,emissive:el==='Cu'?0xff8a2c:el==='Na'?0xffd23c:0xff3a4a,emissiveIntensity:0});
+ cyl(.17,.17,.3,gl,1.3,0,0,g,'x');cyl(.03,.03,.28,M.brass,1.3,0,0,g,'x');
+ lampGlow.push({el,mat:gl});
 });
 tag(turret,'lamp');
 let turretTarget=0;
@@ -1710,7 +1712,7 @@ const bPm=beam([[3.7,BY,0],[4.1,BY,0]],0xffd24a,.05);
 const bD2=beam([[-3.0,BY,-.5],[-3.0,BY,0]],0x9a7bff,.05);
 const bD2b=beam([[-3.0,BY,0],[-.7,BY,0]],0x9a7bff,.025);
 /* front-panel controls: gas door and power / record */
-const BEAMCOL={Cu:0xff9a3c,Zn:0xff5566};
+const BEAMCOL={Cu:0xff9a3c,Zn:0xff5566,Na:0xffd23c};
 const fp={},gd=doors[3].g;
 box(2.7,.8,.02,M.dark,1.5,0,.035,gd);
 [['air',.62,0x5aa9ff,'AIR'],['fuel',1.42,0xff7a59,'C2H2']].forEach(([k,x,col,name])=>{
@@ -1787,16 +1789,16 @@ flame.visible=false;
 const mixC=(a,b,t)=>a.clone().lerp(b,clamp(t,0,1));
 function updateFlame(time){
  flame.visible=S.lit;if(!S.lit){fLight.intensity=0;return}
- const rr=ratio(),c=effConc();
+ const rr=ratio(),W=S.visW;
  let col=mixC(new THREE.Color(0x2f86ff),new THREE.Color(0x6bb6ff),smooth(.5,1,rr));
  col=mixC(col,new THREE.Color(0xffa833),smooth(1.1,1.7,rr));
- col=mixC(col,new THREE.Color(0x12e890),.42*(1-Math.exp(-c.cu/12)));
- col=mixC(col,new THREE.Color(0xffb400),.95*(1-Math.exp(-c.na/4)));
- col=mixC(col,new THREE.Color(0xcfe8ff),.12*smooth(20,200,c.zn));
- col=mixC(col,new THREE.Color(0xffb050),.18*smooth(.5,5,c.m));
- fMatO.color.copy(col);fMatI.color.copy(mixC(col,new THREE.Color(0xffffff),.3*(1-.8*(1-Math.exp(-c.na/4)))));
+ col=mixC(col,new THREE.Color(0x12e890),.42*W.cuF);
+ col=mixC(col,new THREE.Color(0xffb400),.95*W.naW);
+ col=mixC(col,new THREE.Color(0xcfe8ff),.12*W.znF);
+ col=mixC(col,new THREE.Color(0xffb050),.18*W.m);
+ fMatO.color.copy(col);fMatI.color.copy(mixC(col,new THREE.Color(0xffffff),.3*(1-.8*W.naW)));
  const rich=smooth(1.05,1.7,rr);
- fMatO.opacity=.34+.26*rich+.2*(1-Math.exp(-c.na/5))+.07*smooth(.5,5,c.m);fMatI.opacity=.3-.14*rich;
+ fMatO.opacity=.34+.26*rich+.2*W.naW+.07*W.m;fMatI.opacity=.3-.14*rich;
  const h=clamp((.5+.45*rr)*(.6+.4*S.fuel.flow/2),.35,1.7)*(S.litAge<1?.4+.6*S.litAge:1);
  const fl=1+.05*Math.sin(time*31)+.04*Math.sin(time*17+1);
  fOut.scale.set(3.2,h*1.05*fl,.85);fIn.scale.set(2.9,h*.3*fl,.45);
@@ -1821,9 +1823,9 @@ const labelTexC=t=>texCache[t]||(texCache[t]=labelTex(t));
 function rebuildBottles(){
  while(bottleGroup.children.length)bottleGroup.remove(bottleGroup.children[0]);bottleMeshes.length=0;
  const back=solutions.filter(s=>s.kind!=='made'),front=solutions.filter(s=>s.kind==='made');
- const place=(s,i,row,n)=>{
+ const place=(s,i,row,n,xoff)=>{xoff=xoff||0;
   if(!s.vol0)s.vol0=s.vol;
-  const g=new THREE.Group();g.position.set((i-(n-1)/2)*1.1,0,row);bottleGroup.add(g);
+  const g=new THREE.Group();g.position.set((i-(n-1)/2)*1.1+xoff,0,row);bottleGroup.add(g);
   const body=cyl(.32,.32,.85,M.glass,0,.425,0,g);body.userData.solId=s.id;bottleMeshes.push(body);
   const frac=clamp(s.vol/capOf(s),0,1);
   const base=new THREE.Color(0xeaf3ff);
@@ -1834,8 +1836,8 @@ function rebuildBottles(){
   if(S.sel===s.id){const r=new THREE.Mesh(new THREE.TorusGeometry(.42,.03,8,32),new THREE.MeshBasicMaterial({color:0xff9a3c}));r.rotation.x=Math.PI/2;r.position.y=.03;g.add(r)}
   s._pos=new THREE.Vector3(g.position.x,0,row);
  };
- back.forEach((s,i)=>place(s,i,3.2,back.length));
- const per=10;front.forEach((s,i)=>{const row=4.5+Math.floor(i/per)*1.2,idx=i%per;place(s,idx,row,Math.min(per,front.length-Math.floor(i/per)*per))});
+ back.forEach((s,i)=>place(s,i,3.75,back.length,1.7)); /* stock row sits right of the swung-open flame door and clear of the gas panel */
+ const per=8;front.forEach((s,i)=>{const row=5.1+Math.floor(i/per)*1.2,idx=i%per;place(s,0,row,1,-3.35+idx*1.1)}); /* made bottles interleave with the stock row so labels stay readable */
  volSig=sigOf();
  updateCapillary();
 }
@@ -1873,7 +1875,7 @@ canvas.addEventListener('pointerup',e=>{
 canvas.addEventListener('pointermove',e=>{if(e.buttons)return;const p=pickAt(e);canvas.style.cursor=p?'pointer':'grab'});
 
 /* camera presets and open/close */
-const CAMS={over:[[.8,7.2,19.5],[0,1.2,1.2]],lamp:[[-6.5,3.4,6.2],[-4.6,1.9,.5]],flame:[[-1.9,3.2,5.4],[-.7,1.6,.4]],optics:[[3.4,4.2,6.8],[3.2,1.9,0]],gas:[[-2.0,1.7,5.0],[-1.0,.6,-.4]],bench:[[0,5.2,12.5],[0,.8,3.6]]};
+const CAMS={over:[[.8,7.2,19.5],[0,1.2,1.2]],lamp:[[-6.5,3.4,6.2],[-4.6,1.9,.5]],flame:[[-1.9,3.2,5.4],[-.7,1.6,.4]],optics:[[3.4,4.2,6.8],[3.2,1.9,0]],gas:[[-2.0,1.7,5.9],[-1.0,.6,-.4]],bench:[[0,5.2,12.5],[0,.8,3.6]]};
 let camTo=null,openT=0,openGoal=0;
 camera.position.fromArray(CAMS.over[0]);controls.target.fromArray(CAMS.over[1]);
 function goCam(k){camTo={p:V3(CAMS[k][0]),t:V3(CAMS[k][1])};document.querySelectorAll('#viewbar [data-cam]').forEach(b=>b.classList.toggle('on',b.dataset.cam===k))}
@@ -1882,10 +1884,10 @@ const ease=t=>t*t*(3-2*t);
 function sceneFrame(dt,time){
  openT+=(openGoal-openT)*Math.min(1,dt*4);if(Math.abs(openGoal-openT)<.002)openT=openGoal;
  const e=ease(openT);
- doors.forEach(d=>{d.pivot.rotation.y=d.openAng*e});lid.rotation.x=-1.25*e;M.top.opacity=1-.88*e;M.top.depthWrite=e<.3;
+ doors.forEach(d=>{d.pivot.rotation.y=d.part==='gas'?0:d.openAng*e}); /* the gas-box front panel stays closed: the knobs are mounted on it */lid.rotation.x=-1.25*e;M.top.opacity=1-.88*e;M.top.depthWrite=e<.3;
  if(camTo){camera.position.lerp(camTo.p,Math.min(1,dt*3.5));controls.target.lerp(camTo.t,Math.min(1,dt*3.5));if(camera.position.distanceTo(camTo.p)<.03&&controls.target.distanceTo(camTo.t)<.03)camTo=null}
  /* turret */
- const idx=S.lamp.el==='Cu'?0:1;turretTarget=-idx*Math.PI/2;turret.rotation.y+=(turretTarget-turret.rotation.y)*Math.min(1,dt*4);
+ const idx=S.lamp.el==='Cu'?0:S.lamp.el==='Zn'?1:2;turretTarget=-idx*2*Math.PI/3;turret.rotation.y+=(turretTarget-turret.rotation.y)*Math.min(1,dt*4);
  lampGlow.forEach(l=>{const on=S.lamp.on&&S.lamp.el===l.el&&S.mode==='abs';l.mat.emissiveIntensity=on?.5+.5*clamp(S.lamp.I/ELEMENTS[l.el].rec,0,2):0});
  d2Glass.emissiveIntensity=(S.d2.on&&S.mode==='abs')?1.2:0;
  spin.rotation.y+=((S.lamp.on&&S.mode==='abs')||S.d2.on?14:0)*dt;
@@ -1898,7 +1900,7 @@ function sceneFrame(dt,time){
  const monoMatch=o?clamp(o.E/100,.04,1):.04;
  const emOn=S.mode==='em'&&S.lit&&vis;
  bFl.g.visible=lampOn;bMo.g.visible=bPm.g.visible=lampOn||emOn;
- const ce=effConc(),hs={Na:.6*(1-Math.exp(-ce.na/4)),Cu:.75*(1-Math.exp(-ce.cu/6)),Zn:.45*(1-Math.exp(-ce.zn/1.2))};
+ const VW=S.visW,hs={Na:.6*VW.naW,Cu:.75*VW.cuH,Zn:.45*VW.znH};
  let hk='Na';for(const k in hs)if(hs[k]>hs[hk])hk=k;
  const haloAbs=S.mode==='abs'&&S.lit&&vis&&hs[hk]>.04;
  haloO.visible=haloI.visible=emOn||haloAbs;
@@ -2206,7 +2208,7 @@ CUV.flame={
    if(q.lamp&&q.x>960&&!q.dead){this.tout+=1;q.dead=true}
    if(q.em&&q.x>960&&q.tom){this.toMono++;q.dead=true}
    if(q.life<=0||q.dead||q.x<0||q.y<0||q.y>560||q.x>1000)continue;
-   if(q.lamp)circ(q.x,q.y,3.2,S.lamp.el==='Zn'?'#ff5566':'#ff9a3c');else line(q.x,q.y,q.x-q.vx*.03,q.y-q.vy*.03,q.tom?'#ffffff':col2,q.tom?2.5:1.2);
+   if(q.lamp)circ(q.x,q.y,3.2,S.lamp.el==='Zn'?'#ff5566':S.lamp.el==='Na'?'#ffd23c':'#ff9a3c');else line(q.x,q.y,q.x-q.vx*.03,q.y-q.vy*.03,q.tom?'#ffffff':col2,q.tom?2.5:1.2);
    next.push(q);
   }
   this.ph=next;
@@ -2467,8 +2469,8 @@ const PARTS={
 };
 let cardTab='gas';
 const CUMAP={burner:'flame',neb:'neb',mono:'mono',pmt:'pmt',chopper:'chop'};let cardCU=null;
-function showCard(p){const d=PARTS[p];if(!d)return;cardCU=CUMAP[p]||null;$('cardL').hidden=!cardCU;$('cardT').textContent=d[0];$('cardP').textContent=d[1];cardTab=d[2];$('card').style.display='block'}
-function hideCard(){$('card').style.display='none'}
+function showCard(p){const d=PARTS[p];if(!d)return;cardCU=CUMAP[p]||null;$('cardL').hidden=!cardCU;$('cardT').textContent=d[0];$('cardP').textContent=d[1];cardTab=d[2];$('card').style.display='block';$('hint').style.visibility='hidden'}
+function hideCard(){$('card').style.display='none';$('hint').style.visibility='visible'}
 $('cardL').onclick=()=>{hideCard();if(cardCU)openCU(cardCU)};
 $('cardB').onclick=()=>{showTab(cardTab);hideCard()};
 
